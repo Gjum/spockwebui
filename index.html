@@ -4,124 +4,37 @@
     <meta charset="UTF-8">
     <title>Spock UI</title>
     <style type="text/css">
-        path.gaugeOutline {
-            stroke: #525252;
+        path.gauge {
             stroke-width: 5px;
             fill: none;
         }
 
+        path.gaugeOutline {
+            stroke: #555555;
+        }
+
         path.gaugeValue {
             stroke: #1385ff;
-            stroke-width: 10px;
-            fill: none;
         }
 
         body {
-            background-color: rgb(57, 57, 57);
+            background-color: #333639;
         }
     </style>
 </head>
 <body onload="init()">
 <script type="text/javascript">
-    function Gauge() {
-        this.startAngle = 240;
-        this.sizeAngle = 240;
-        this.radius = 100;
-        this.speed = 0;
-
-        this.targetVal = 0;
-        this.drawnVal = 0;
-        this.timeoutId = null;
-
-        this.outlineElement = null;
-        this.valueElement = null;
-        this.svgElement = null;
-
-        this.setValue = function (newVal, immediate) {
-            if (this.timeoutId) window.clearTimeout(this.timeoutId);
-            if (immediate) {
-                this.targetVal = this.drawnVal = newVal;
-                this.updateValueElement();
-            } else {
-                this.targetVal = newVal;
-                var self = this;
-                interpolateTick();
-            }
-            return this;
-
-            function interpolateTick() {
-                var deltaVal = self.drawnVal - self.targetVal;
-                var arcPixel = self.sizeAngle / 360 * 6.28 * self.radius;
-                var deltaPixel = deltaVal * arcPixel;
-                console.log("deltaPixel", deltaPixel);
-                if (Math.abs(deltaPixel) < 1) {
-                    // close enough to finish
-                    self.drawnVal = self.targetVal;
-                    self.updateValueElement();
-                    return; // interpolation done
-                }
-
-                var minTimeout = 20;
-                var progress = .2;
-                self.drawnVal = self.drawnVal * (1 - progress)
-                        + self.targetVal * progress;
-                self.updateValueElement();
-                self.timeoutId = window.setTimeout(interpolateTick, 50);
-            }
-
-        };
-
-        this.updateValueElement = function () {
-            if (!this.valueElement) return;
-            this.valueElement.setAttribute("d", this.describeArc(0, 0, this.radius,
-                    this.startAngle, this.startAngle + this.sizeAngle * this.drawnVal));
-        };
-
-        this.addToBody = function () {
-            if (this.outlineElement) {
-                console.log("already added");
-                return this;
-            }
-
-            var boxRadius = this.radius + 10;
-            var width = 2 * boxRadius;
-            var height = 2 * boxRadius;
-            var viewBox = [-boxRadius, -boxRadius, width, height].join(" ");
-
-            this.outlineElement = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            this.outlineElement.setAttribute("class", "gaugeOutline");
-            this.outlineElement.setAttribute("d", this.describeArc(0, 0,
-                    this.radius, this.startAngle, this.startAngle + this.sizeAngle));
-
-            this.valueElement = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            this.valueElement.setAttribute("class", "gaugeValue");
-            this.updateValueElement();
-
-            this.svgElement = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            this.svgElement.setAttribute("width", width + "px");
-            this.svgElement.setAttribute("height", height + "px");
-            this.svgElement.setAttribute("viewBox", viewBox);
-            this.svgElement.appendChild(this.outlineElement);
-            this.svgElement.appendChild(this.valueElement);
-            document.body.appendChild(this.svgElement);
-            console.log("Added", this);
-            return this;
-        }
-    }
-
-    Gauge.prototype.polarToCartesian = function (centerX, centerY, radius, angleInDegrees) {
+    function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
         var angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
-
         return {
             x: centerX + (radius * Math.cos(angleInRadians)),
             y: centerY + (radius * Math.sin(angleInRadians))
         };
-    };
+    }
 
-    Gauge.prototype.describeArc = function (x, y, radius, startAngle, endAngle) {
-
-        var start = this.polarToCartesian(x, y, radius, startAngle);
-        var end = this.polarToCartesian(x, y, radius, endAngle);
+    function describeArc(x, y, radius, startAngle, endAngle) {
+        var start = polarToCartesian(x, y, radius, startAngle);
+        var end = polarToCartesian(x, y, radius, endAngle);
 
         var deltaAngle = (endAngle - startAngle);
         var largeArc = Math.abs(deltaAngle) % 360 >= 180 ? "1" : "0";
@@ -131,25 +44,142 @@
             "M", start.x, start.y,
             "A", radius, radius, 0, largeArc, arcSweep, end.x, end.y
         ].join(" ");
-    };
+    }
+
+    function setObjAttr(attr, val) {
+        this[attr] = val;
+        return this;
+    }
+
+    function Gauge(id) {
+        this.radius = 50;
+        this.blur = 3;
+        this.startAngle = 240;
+        this.sizeAngle = 240;
+
+        this.targetVal = 0;
+        var drawnVal = 0;
+        var speed = 0;
+        var timeoutId = null;
+
+        var outlineElement = null;
+        var valueElement = null;
+        var svgElement = null;
+
+        this.set = setObjAttr;
+        var self = this;
+
+        this.setValue = function (newVal, immediate) {
+            if (1 < newVal && newVal <= 100) newVal *= 0.01;
+            else if (newVal < 0 || 100 < newVal) {
+                console.warn(id, "Ignoring out of range value ", newVal);
+                return;
+            }
+
+            if (timeoutId) window.clearTimeout(timeoutId);
+
+            if (immediate) {
+                self.targetVal = drawnVal = newVal;
+                updateValueElement();
+            } else {
+                self.targetVal = newVal;
+                interpolateTick();
+            }
+
+            return this;
+
+            function interpolateTick() {
+                var deltaVal = drawnVal - self.targetVal;
+                var arcPixel = self.sizeAngle / 360 * 6.28 * self.radius;
+                var deltaPixel = deltaVal * arcPixel;
+                console.log("deltaPixel", deltaPixel);
+                //  TODO use animation helper
+
+                if (Math.abs(deltaPixel) > 1) {
+                    var minTimeout = 20;
+                    var progress = .2;
+                    drawnVal = drawnVal * (1 - progress)
+                            + self.targetVal * progress;
+                    updateValueElement();
+                    timeoutId = window.setTimeout(interpolateTick, 50);
+                } else { // interpolation done
+                    // close enough to finish
+                    drawnVal = self.targetVal;
+                    updateValueElement();
+                }
+            }
+
+            function updateValueElement() {
+                if (!valueElement) return;
+                valueElement.setAttribute("d", describeArc(0, 0, self.radius,
+                        self.startAngle, self.startAngle + self.sizeAngle * drawnVal));
+            }
+        };
+
+        this.addToBody = function () {
+            if (outlineElement) {
+                console.warn(id, "Already added to body");
+                return this;
+            }
+
+            var boxRadius = this.radius + 10;
+            var width = 2 * boxRadius;
+            var height = 2 * boxRadius;
+            var viewBox = [-boxRadius, -boxRadius, width, height].join(" ");
+
+            var svgNS = "http://www.w3.org/2000/svg";
+
+            outlineElement = document.createElementNS(svgNS, "path");
+            outlineElement.setAttribute("class", "gauge gaugeOutline");
+            outlineElement.setAttribute("d", describeArc(0, 0,
+                    this.radius, this.startAngle, this.startAngle + this.sizeAngle));
+
+            valueElement = document.createElementNS(svgNS, "path");
+            valueElement.setAttribute("class", "gauge gaugeValue");
+
+            svgElement = document.createElementNS(svgNS, "svg");
+            svgElement.setAttribute("width", width + "px");
+            svgElement.setAttribute("height", height + "px");
+            svgElement.setAttribute("viewBox", viewBox);
+            svgElement.appendChild(outlineElement);
+            svgElement.appendChild(valueElement);
+            document.body.appendChild(svgElement);
+
+            if (this.blur) {
+                var blurId = "filterBlur" + id;
+
+                var blur = document.createElementNS(svgNS, "feGaussianBlur");
+                blur.setAttribute("in", "SourceGraphic");
+                blur.setAttribute("stdDeviation", this.blur);
+
+                var filter = document.createElementNS(svgNS, "filter");
+                filter.setAttribute("id", blurId);
+                filter.appendChild(blur);
+
+                svgElement.appendChild(filter);
+                valueElement.setAttribute("filter", "url(#" + blurId + ")");
+            }
+
+            this.setValue(drawnVal, "immediate");
+            return this;
+        };
+
+    }
 
     function init() {
+
+        var fooGauge = new Gauge("foo")
+                .set("radius", 100)
+                .set("startAngle", 480)
+                .set("sizeAngle", -240)
+                .addToBody()
+                .setValue(.2, "immediate")
+                .setValue(.8);
 
 //        var counter = 0;
 //        var inter = (1 - Math.abs((counter % 100) / 50 - 1))
 //        counter += 1
 
-        var fooGauge = new Gauge().addToBody().setValue(.2, "immediate");
-        var t = 1;
-        window.setTimeout(function () {
-            fooGauge.setValue(.8, "immediate")
-        }, 1000 * t++);
-        window.setTimeout(function () {
-            fooGauge.setValue(0)
-        }, 1000 * t++);
-        window.setTimeout(function () {
-            fooGauge.setValue(1)
-        }, 1000 * t++);
 
         var messagesElement = document.createElement('ul');
         ws.onmessage = function (event) {
@@ -168,6 +198,12 @@
         var command = document.getElementById("commandText").textContent;
         ws.send("command:" + command);
     }
+</script>
+<script>
+    new Gauge("first")
+            .addToBody()
+            .setValue(.8, "immediate")
+            .setValue(.2)
 </script>
 
 </body>
