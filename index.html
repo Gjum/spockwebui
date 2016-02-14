@@ -4,26 +4,39 @@
     <meta charset="UTF-8">
     <title>Spock UI</title>
     <style type="text/css">
-        path.gauge {
-            stroke-width: 5px;
+        .guiLine {
             fill: none;
         }
 
-        path.gaugeOutline {
+        .lineGuide {
             stroke: #555555;
+            stroke-width: 3px;
         }
 
-        path.gaugeValue {
+        .lineHighlight {
             stroke: #1385ff;
+            stroke-width: 5px;
+        }
+
+        .guiShape {
+            stroke: none;
+        }
+
+        .shapeGuide {
+            fill: #555555;
+        }
+
+        .shapeHighlight {
+            fill: #1385ff;
         }
 
         body {
             background-color: #333639;
         }
     </style>
-</head>
-<body onload="init()">
-<script type="text/javascript">
+    <script type="text/javascript">
+    var svgNS = "http://www.w3.org/2000/svg";
+
     function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
         var angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
         return {
@@ -32,7 +45,7 @@
         };
     }
 
-    function describeArc(x, y, radius, startAngle, endAngle) {
+    function updateArc(path, x, y, radius, startAngle, endAngle) {
         var start = polarToCartesian(x, y, radius, startAngle);
         var end = polarToCartesian(x, y, radius, endAngle);
 
@@ -40,10 +53,19 @@
         var largeArc = Math.abs(deltaAngle) % 360 >= 180 ? "1" : "0";
         var arcSweep = deltaAngle >= 0 ? "1" : "0";
 
-        return [
+        var d = [
             "M", start.x, start.y,
             "A", radius, radius, 0, largeArc, arcSweep, end.x, end.y
         ].join(" ");
+
+        path.setAttribute("d", d);
+        return d;
+    }
+
+    function interpolate(progress, from, to) {
+        if (progress < 0 || 1 < progress)
+            console.warn("Interpolating out of range:", progress);
+        return from * (1 - progress) + to * progress;
     }
 
     function setObjAttr(attr, val) {
@@ -51,130 +73,169 @@
         return this;
     }
 
+    function makeSvg(left, top, width, height) {
+        var svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("width", width + "px");
+        svg.setAttribute("height", height + "px");
+        svg.setAttribute("viewBox", [left, top, width, height].join(" "));
+        return svg;
+    }
+
+    function createOrGetGlobalSvg(id) {
+        var svg = document.getElementById(id);
+        if (svg) return svg;
+        // else: not found, create
+
+        svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("style", "visible:false;position:absolute;width:0;height:0");
+        document.body.appendChild(svg);
+
+        return svg;
+    }
+
+    function setBlur(element, id) {
+        id = id || "globalSvgBlurFilter";
+        var filterUrl = "url(#" + id + ")";
+
+        if (!document.getElementById(id)) {
+            var blur = document.createElementNS(svgNS, "feGaussianBlur");
+            // blur.setAttribute("in", "StrokePaint");
+            blur.setAttribute("in", "SourceGraphic");
+            blur.setAttribute("stdDeviation", "3");
+
+            var filter = document.createElementNS(svgNS, "filter");
+            filter.setAttribute("id", id);
+            filter.appendChild(blur);
+
+            createOrGetGlobalSvg().appendChild(filter);
+        }
+
+        element.setAttribute("filter", filterUrl);
+        return filterUrl;
+    }
+
     function Gauge(id) {
+        this.minVal = 0;
+        this.maxVal = 1;
         this.radius = 50;
-        this.blur = 3;
         this.startAngle = 240;
         this.sizeAngle = 240;
+        this.blur = true;
 
-        this.targetVal = 0;
+        this.value = 0;
         var drawnVal = 0;
-        var speed = 0;
         var timeoutId = null;
 
-        var outlineElement = null;
-        var valueElement = null;
         var svgElement = null;
+        var valueElement = null;
 
         this.set = setObjAttr;
         var self = this;
 
         this.setValue = function (newVal, immediate) {
-            if (1 < newVal && newVal <= 100) newVal *= 0.01;
-            else if (newVal < 0 || 100 < newVal) {
-                console.warn(id, "Ignoring out of range value ", newVal);
+            if (timeoutId) window.clearTimeout(timeoutId); // stop animation
+
+            if (!valueElement) {
+                console.warn("Gauge", id, "setting value before adding to DOM");
                 return;
             }
 
-            if (timeoutId) window.clearTimeout(timeoutId);
-
-            if (immediate) {
-                self.targetVal = drawnVal = newVal;
-                updateValueElement();
-            } else {
-                self.targetVal = newVal;
-                interpolateTick();
+            if (newVal < self.minVal) {
+                console.warn("Gauge", id, "got too small value", newVal, "<", self.minVal);
+                newVal = self.minVal;
             }
+            else if (newVal > self.maxVal) {
+                console.warn("Gauge", id, "got too large value", newVal, ">", self.maxVal);
+                newVal = self.maxVal;
+            }
+
+            self.value = newVal;
+
+            if (immediate) setDrawnValue(self.value);
+            else interpolateTick();
 
             return this;
 
             function interpolateTick() {
-                var deltaVal = drawnVal - self.targetVal;
-                var arcPixel = self.sizeAngle / 360 * 6.28 * self.radius;
+                var arcPixel = 6.28 * self.radius * self.sizeAngle / 360;
+                var deltaVal = drawnVal - self.value;
                 var deltaPixel = deltaVal * arcPixel;
-                console.log("deltaPixel", deltaPixel);
                 //  TODO use animation helper
 
-                if (Math.abs(deltaPixel) > 1) {
-                    var minTimeout = 20;
-                    var progress = .2;
-                    drawnVal = drawnVal * (1 - progress)
-                            + self.targetVal * progress;
-                    updateValueElement();
-                    timeoutId = window.setTimeout(interpolateTick, 50);
-                } else { // interpolation done
+                if (Math.abs(deltaPixel) < 1) {
                     // close enough to finish
-                    drawnVal = self.targetVal;
-                    updateValueElement();
+                    setDrawnValue(self.value);
+                } else {
+                    setDrawnValue(interpolate(.2, drawnVal, self.value));
+                    timeoutId = window.setTimeout(interpolateTick, 50);
                 }
             }
-
-            function updateValueElement() {
-                if (!valueElement) return;
-                valueElement.setAttribute("d", describeArc(0, 0, self.radius,
-                        self.startAngle, self.startAngle + self.sizeAngle * drawnVal));
-            }
         };
 
-        this.addToBody = function () {
-            if (outlineElement) {
-                console.warn(id, "Already added to body");
-                return this;
-            }
-
-            var boxRadius = this.radius + 10;
-            var width = 2 * boxRadius;
-            var height = 2 * boxRadius;
-            var viewBox = [-boxRadius, -boxRadius, width, height].join(" ");
-
-            var svgNS = "http://www.w3.org/2000/svg";
-
-            outlineElement = document.createElementNS(svgNS, "path");
-            outlineElement.setAttribute("class", "gauge gaugeOutline");
-            outlineElement.setAttribute("d", describeArc(0, 0,
-                    this.radius, this.startAngle, this.startAngle + this.sizeAngle));
-
-            valueElement = document.createElementNS(svgNS, "path");
-            valueElement.setAttribute("class", "gauge gaugeValue");
-
-            svgElement = document.createElementNS(svgNS, "svg");
-            svgElement.setAttribute("width", width + "px");
-            svgElement.setAttribute("height", height + "px");
-            svgElement.setAttribute("viewBox", viewBox);
-            svgElement.appendChild(outlineElement);
-            svgElement.appendChild(valueElement);
-            document.body.appendChild(svgElement);
-
-            if (this.blur) {
-                var blurId = "filterBlur" + id;
-
-                var blur = document.createElementNS(svgNS, "feGaussianBlur");
-                blur.setAttribute("in", "SourceGraphic");
-                blur.setAttribute("stdDeviation", this.blur);
-
-                var filter = document.createElementNS(svgNS, "filter");
-                filter.setAttribute("id", blurId);
-                filter.appendChild(blur);
-
-                svgElement.appendChild(filter);
-                valueElement.setAttribute("filter", "url(#" + blurId + ")");
-            }
-
-            this.setValue(drawnVal, "immediate");
+        this.addToElement = function (element) {
+            element.appendChild(this.getElement());
             return this;
         };
+
+        this.getElement = function () {
+            if (!svgElement) createElements();
+            return svgElement;
+        };
+
+        function createElements() {
+            if (valueElement) {
+                console.warn("Gauge", id, "was already created");
+                return svgElement;
+            }
+
+            valueElement = document.createElementNS(svgNS, "path");
+            valueElement.setAttribute("class", "guiLine lineHighlight");
+            if (self.blur) setBlur(valueElement);
+            setDrawnValue(self.value);
+
+            var outlineElement = document.createElementNS(svgNS, "path");
+            outlineElement.setAttribute("class", "guiLine lineGuide");
+            var endAngle = self.startAngle + self.sizeAngle;
+            updateArc(outlineElement, 0, 0, self.radius, self.startAngle, endAngle);
+
+            var maxBottomAngle = Math.max(self.startAngle, endAngle);
+            var bottomPart = polarToCartesian(0, 0, self.radius, maxBottomAngle).y;
+
+            var padding = 10;
+            var boxRadius = self.radius + padding;
+            var left = -boxRadius;
+            var top = -boxRadius;
+            var width = 2 * boxRadius;
+            var height = boxRadius + padding + bottomPart;
+
+            svgElement = makeSvg(left, top, width, height);
+            svgElement.appendChild(outlineElement);
+            svgElement.appendChild(valueElement);
+
+            return svgElement;
+        }
+
+
+        function valToAngle(val) {
+            // can be out of range because of default value 0
+            // user input is checked and logged in setValue()
+            if (val < self.minVal) val = self.minVal;
+            else if (val > self.maxVal) val = self.maxVal;
+
+            var valRange = self.maxVal - self.minVal;
+            return self.startAngle + self.sizeAngle * (val - self.minVal) / valRange;
+        }
+
+        function setDrawnValue(val) {
+            drawnVal = val;
+            updateArc(valueElement, 0, 0, self.radius,
+                    self.startAngle, valToAngle(drawnVal));
+        }
 
     }
 
     function init() {
 
-        var fooGauge = new Gauge("foo")
-                .set("radius", 100)
-                .set("startAngle", 480)
-                .set("sizeAngle", -240)
-                .addToBody()
-                .setValue(.2, "immediate")
-                .setValue(.8);
 
 //        var counter = 0;
 //        var inter = (1 - Math.abs((counter % 100) / 50 - 1))
@@ -198,13 +259,125 @@
         var command = document.getElementById("commandText").textContent;
         ws.send("command:" + command);
     }
+    </script>
+</head>
+<body onload="init()">
+<script>
+    var g = new Gauge("First")
+            .set("minVal", 20)
+            .set("maxVal", 40)
+            .addToElement(document.body)
+            .setValue(35, "immediate")
+            .setValue(40);
+
+     window.setTimeout(function () {
+         g.setValue(30)
+     }, 1000);
 </script>
 <script>
-    new Gauge("first")
-            .addToBody()
-            .setValue(.8, "immediate")
-            .setValue(.2)
+    var fooGauge = new Gauge("Foo")
+            .set("radius", 20)
+            .set("startAngle", 480)
+            .set("sizeAngle", -240)
+            .addToElement(document.body)
+            .setValue(.2, "immediate")
+            .setValue(.8);
+
+    // var t = 1;
+    // window.setTimeout(function () {
+    //     fooGauge.setValue(.8, "immediate")
+    // }, 1000 * t++);
+    // window.setTimeout(function () {
+    //     fooGauge.setValue(0)
+    // }, 1000 * t++);
+    // window.setTimeout(function () {
+    //     fooGauge.setValue(1)
+    // }, 1000 * t++);
+
+    // var counter = 0;
+    // var inter = (1 - Math.abs((counter % 100) / 50 - 1))
+    // counter += 1
 </script>
+
+<br /><!-- expected svgs for comparison -->
+
+<svg width="120px" height="95" viewBox="-60 -60 120 95">
+    <path class="guiLine lineGuide"
+          d="M -43.30127018922194 24.999999999999996 A 50 50 0 1 1 43.30127018922195 24.999999999999964"></path>
+    <path class="guiLine lineHighlight"
+          d="M -43.30127018922194 24.999999999999996 A 50 50 0 0 1 -9.184850993605149e-15 -50"
+          filter="url(#globalSvgBlurFilter)"></path>
+</svg>
+<svg width="60px" height="50" viewBox="-30 -30 60 50">
+    <path class="guiLine lineGuide"
+          d="M 17.32050807568878 9.999999999999986 A 20 20 0 1 0 -17.320508075688775 9.999999999999998"></path>
+    <path class="guiLine lineHighlight"
+          d="M 17.32050807568878 9.999999999999986 A 20 20 0 1 0 -19.02113032590307 -6.180339887498954"
+          filter="url(#globalSvgBlurFilter)"></path>
+</svg>
+
+<br /><!-- experiments -->
+
+<!-- TODO line graph -->
+<svg width="220px" height="120px" viewBox="-10 -10 220 120" style="border:1px dotted gray">
+    <g class="guiShape shapeGuide">
+        <polyline class="guiLine lineGuide" points="0,20 50,100 100,0 150,70 200,20"></polyline>
+        <circle r="6" cx="0" cy="20"></circle>
+        <circle r="6" cx="50" cy="100"></circle>
+        <circle r="6" cx="100" cy="0"></circle>
+        <circle r="6" cx="150" cy="70"></circle>
+        <circle r="6" cx="200" cy="20"></circle>
+    </g>
+    <g class="guiShape shapeHighlight" filter="url(#globalSvgBlurFilter)">
+        <polyline class="guiLine lineHighlight" points="0,20 50,100 100,0 150,70 200,20"></polyline>
+        <circle r="6" cx="0" cy="20"></circle>
+        <circle r="6" cx="50" cy="100"></circle>
+        <circle r="6" cx="100" cy="0"></circle>
+        <circle r="6" cx="150" cy="70"></circle>
+        <circle r="6" cx="200" cy="20"></circle>
+    </g>
+</svg>
+
+<!-- TODO histogram -->
+<!-- TODO use rect? -->
+<svg width="220px" height="120px" viewBox="-10 -10 220 120" style="border:1px dotted gray">
+    <g class="guiLine lineGuide">
+        <line x1="0" x2="0" y1="100" y2="70"></line>
+        <line x1="50" x2="50" y1="100" y2="20"></line>
+        <line x1="100" x2="100" y1="100" y2="30"></line>
+        <line x1="150" x2="150" y1="100" y2="60"></line>
+        <line x1="200" x2="200" y1="100" y2="50"></line>
+    </g>
+    <g class="guiShape shapeGuide">
+        <circle r="6" cx="0" cy="70"></circle>
+        <circle r="6" cx="50" cy="20"></circle>
+        <circle r="6" cx="100" cy="30"></circle>
+        <circle r="6" cx="150" cy="60"></circle>
+        <circle r="6" cx="200" cy="50"></circle>
+    </g>
+    <g class="guiShape shapeHighlight" filter="url(#globalSvgBlurFilter)">
+        <circle r="6" cx="0" cy="70"></circle>
+        <circle r="6" cx="50" cy="20"></circle>
+        <circle r="6" cx="100" cy="30"></circle>
+        <circle r="6" cx="150" cy="60"></circle>
+        <circle r="6" cx="200" cy="50"></circle>
+    </g>
+    <g filter="url(#globalSvgBlurFilter)">
+        <!-- TODO this doesnt show ?! -->
+        <line class="guiLine lineHighlight" filter="url(#globalSvgBlurFilter)"
+              x1="100" x2="100" y1="100" y2="70"></line>
+    </g>
+</svg>
+
+<br/><!-- TODO stroke dash animation -->
+<svg width="120px" height="95" viewBox="-60 -60 120 95">
+    <path class="guiLine lineGuide" d="M -43.3 25 A 50 50 0 1 1 43.3 25"></path>
+    <path class="guiLine lineHighlight" d="M -43.3 25 A 50 50 0 1 1 43.3 25"
+          stroke-dasharray="0 210 210 0"
+          stroke-dashoffset="0"
+          id="strokegauge" filter="url(#globalSvgBlurFilter)"></path>
+</svg>
+<label><input type="range" value="0" onmousemove="this.nextSibling.textContent = this.value;document.getElementById('strokegauge').setAttribute('stroke-dashoffset', -2/3*2*50*3.1416*this.value/100)"/>0</label>
 
 </body>
 </html>
