@@ -32,6 +32,7 @@
 
         body {
             background-color: #333639;
+            color: #bebebe;
         }
     </style>
     <script type="text/javascript">
@@ -45,21 +46,16 @@
         };
     }
 
-    function updateArc(path, x, y, radius, startAngle, endAngle) {
+    function describeArc(x, y, radius, startAngle, endAngle) {
         var start = polarToCartesian(x, y, radius, startAngle);
         var end = polarToCartesian(x, y, radius, endAngle);
-
         var deltaAngle = (endAngle - startAngle);
         var largeArc = Math.abs(deltaAngle) % 360 >= 180 ? "1" : "0";
         var arcSweep = deltaAngle >= 0 ? "1" : "0";
-
-        var d = [
+        return [
             "M", start.x, start.y,
             "A", radius, radius, 0, largeArc, arcSweep, end.x, end.y
         ].join(" ");
-
-        path.setAttribute("d", d);
-        return d;
     }
 
     function interpolate(progress, from, to) {
@@ -99,8 +95,7 @@
 
         if (!document.getElementById(id)) {
             var blur = document.createElementNS(svgNS, "feGaussianBlur");
-            // blur.setAttribute("in", "StrokePaint");
-            blur.setAttribute("in", "SourceGraphic");
+            blur.setAttribute("in", "StrokePaint");
             blur.setAttribute("stdDeviation", "3");
 
             var filter = document.createElementNS(svgNS, "filter");
@@ -115,17 +110,20 @@
     }
 
     function Gauge(id) {
+        this.value = 0;
         this.minVal = 0;
         this.maxVal = 1;
         this.radius = 50;
         this.startAngle = 240;
-        this.sizeAngle = 240;
+        this.endAngle = 480;
         this.blur = true;
+        // TODO refactor animation stuff into helper
+        this.animDuration = 500;
+        var targetDashOffset = null;
+        var animStartDashOffset = null;
+        var animation = null;
 
-        this.value = 0;
-        var drawnVal = 0;
-        var timeoutId = null;
-
+        var arcPixel = 0;
         var svgElement = null;
         var valueElement = null;
 
@@ -133,12 +131,22 @@
         var self = this;
 
         this.setValue = function (newVal, immediate) {
-            if (timeoutId) window.clearTimeout(timeoutId); // stop animation
-
             if (!valueElement) {
                 console.warn("Gauge", id, "setting value before adding to DOM");
                 return;
             }
+
+            if (animation) {
+                // calculate the current attribute value,
+                // because the DOM does not store it
+                // TODO can we get the current attribute value from the animation object?
+                var progress = animation.currentTime / self.animDuration;
+                animation.finish();
+                animation = null;
+                animStartDashOffset = interpolate(progress, animStartDashOffset, targetDashOffset);
+                // TODO cubic spline?
+            }
+            else animStartDashOffset = valueElement.getAttribute("stroke-dashoffset");
 
             if (newVal < self.minVal) {
                 console.warn("Gauge", id, "got too small value", newVal, "<", self.minVal);
@@ -151,25 +159,20 @@
 
             self.value = newVal;
 
-            if (immediate) setDrawnValue(self.value);
-            else interpolateTick();
+            targetDashOffset = getDashOffset(self.value);
+
+            if (!immediate) {
+                animation = valueElement.animate([
+                    {strokeDashoffset: animStartDashOffset},
+                    {strokeDashoffset: targetDashOffset}
+                ], self.animDuration);
+            }
+
+            // after the animation is done, the property reverts to
+            // its previous state, so we still have to set the target value
+            valueElement.setAttribute("stroke-dashoffset", targetDashOffset);
 
             return this;
-
-            function interpolateTick() {
-                var arcPixel = 6.28 * self.radius * self.sizeAngle / 360;
-                var deltaVal = drawnVal - self.value;
-                var deltaPixel = deltaVal * arcPixel;
-                //  TODO use animation helper
-
-                if (Math.abs(deltaPixel) < 1) {
-                    // close enough to finish
-                    setDrawnValue(self.value);
-                } else {
-                    setDrawnValue(interpolate(.2, drawnVal, self.value));
-                    timeoutId = window.setTimeout(interpolateTick, 50);
-                }
-            }
         };
 
         this.addToElement = function (element) {
@@ -188,17 +191,30 @@
                 return svgElement;
             }
 
+            var sizeAngle = self.endAngle - self.startAngle;
+            arcPixel = Math.abs(6.283 * self.radius * sizeAngle / 360);
+
+            var dasharray = [0, arcPixel, arcPixel, 0].join(" ");
+            var d = describeArc(0, 0, self.radius, self.startAngle, self.endAngle);
+
             valueElement = document.createElementNS(svgNS, "path");
             valueElement.setAttribute("class", "guiLine lineHighlight");
+            valueElement.setAttribute("d", d);
+            // The value is displayed using a dashed pattern,
+            // one dash (in the negaive direction) being
+            // 100% color followed by 100% transparency.
+            // This way the dash offset (and thus the visible arc length)
+            // can be animated, while the arc endpoint coordinates can not
+            // (well, they can be animated linearly, which looks odd).
+            valueElement.setAttribute("stroke-dasharray", dasharray);
+            valueElement.setAttribute("stroke-dashoffset", getDashOffset(self.value));
             if (self.blur) setBlur(valueElement);
-            setDrawnValue(self.value);
 
             var outlineElement = document.createElementNS(svgNS, "path");
             outlineElement.setAttribute("class", "guiLine lineGuide");
-            var endAngle = self.startAngle + self.sizeAngle;
-            updateArc(outlineElement, 0, 0, self.radius, self.startAngle, endAngle);
+            outlineElement.setAttribute("d", d);
 
-            var maxBottomAngle = Math.max(self.startAngle, endAngle);
+            var maxBottomAngle = Math.max(self.startAngle, self.endAngle);
             var bottomPart = polarToCartesian(0, 0, self.radius, maxBottomAngle).y;
 
             var padding = 10;
@@ -209,27 +225,23 @@
             var height = boxRadius + padding + bottomPart;
 
             svgElement = makeSvg(left, top, width, height);
+            svgElement.setAttribute("id", id);
             svgElement.appendChild(outlineElement);
             svgElement.appendChild(valueElement);
 
             return svgElement;
         }
 
-
-        function valToAngle(val) {
-            // can be out of range because of default value 0
+        function getDashOffset(val) {
+            // can be out of range, because default value is 0
             // user input is checked and logged in setValue()
             if (val < self.minVal) val = self.minVal;
             else if (val > self.maxVal) val = self.maxVal;
 
             var valRange = self.maxVal - self.minVal;
-            return self.startAngle + self.sizeAngle * (val - self.minVal) / valRange;
-        }
+            var valueFraction = (val - self.minVal) / valRange;
 
-        function setDrawnValue(val) {
-            drawnVal = val;
-            updateArc(valueElement, 0, 0, self.radius,
-                    self.startAngle, valToAngle(drawnVal));
+            return -arcPixel * valueFraction;
         }
 
     }
@@ -237,61 +249,37 @@
     function init() {
 
 
-//        var counter = 0;
-//        var inter = (1 - Math.abs((counter % 100) / 50 - 1))
-//        counter += 1
-
-
-        var messagesElement = document.createElement('ul');
-        ws.onmessage = function (event) {
-            var message = document.createElement('li');
-            var content = document.createTextNode(event.data);
-            message.appendChild(content);
-            messagesElement.appendChild(message);
-        };
-        document.body.appendChild(messagesElement);
-
-    }
-
-    var ws = new WebSocket("ws://127.0.0.1:5678/");
-
-    function onCommand() {
-        var command = document.getElementById("commandText").textContent;
-        ws.send("command:" + command);
     }
     </script>
 </head>
 <body onload="init()">
 <script>
-    var g = new Gauge("First")
+    var firstGauge = new Gauge("First")
             .set("minVal", 20)
             .set("maxVal", 40)
             .addToElement(document.body)
-            .setValue(35, "immediate")
-            .setValue(40);
-
-     window.setTimeout(function () {
-         g.setValue(30)
-     }, 1000);
+            .setValue(40, "immediate")
+            .setValue(20);
+    window.setTimeout(firstGauge.setValue, 1000, 30);
 </script>
 <script>
-    var fooGauge = new Gauge("Foo")
+    var reversedGauge = new Gauge("Reversed")
             .set("radius", 20)
             .set("startAngle", 480)
-            .set("sizeAngle", -240)
+            .set("endAngle", 240)
             .addToElement(document.body)
             .setValue(.2, "immediate")
             .setValue(.8);
 
     // var t = 1;
     // window.setTimeout(function () {
-    //     fooGauge.setValue(.8, "immediate")
+    //     reversedGauge.setValue(.8, "immediate")
     // }, 1000 * t++);
     // window.setTimeout(function () {
-    //     fooGauge.setValue(0)
+    //     reversedGauge.setValue(0)
     // }, 1000 * t++);
     // window.setTimeout(function () {
-    //     fooGauge.setValue(1)
+    //     reversedGauge.setValue(1)
     // }, 1000 * t++);
 
     // var counter = 0;
@@ -299,7 +287,9 @@
     // counter += 1
 </script>
 
-<br /><!-- expected svgs for comparison -->
+<br />
+expected final svgs for comparison:
+<br />
 
 <svg width="120px" height="95" viewBox="-60 -60 120 95">
     <path class="guiLine lineGuide"
@@ -316,7 +306,7 @@
           filter="url(#globalSvgBlurFilter)"></path>
 </svg>
 
-<br /><!-- experiments -->
+<br/><!-- experiments -->
 
 <!-- TODO line graph -->
 <svg width="220px" height="120px" viewBox="-10 -10 220 120" style="border:1px dotted gray">
@@ -339,7 +329,7 @@
 </svg>
 
 <!-- TODO histogram -->
-<!-- TODO use rect? -->
+<!-- TODO use rectangles? -->
 <svg width="220px" height="120px" viewBox="-10 -10 220 120" style="border:1px dotted gray">
     <g class="guiLine lineGuide">
         <line x1="0" x2="0" y1="100" y2="70"></line>
@@ -363,13 +353,14 @@
         <circle r="6" cx="200" cy="50"></circle>
     </g>
     <g filter="url(#globalSvgBlurFilter)">
-        <!-- TODO this doesnt show ?! -->
+        <!-- TODO blurred histogram line is invisible ?! -->
         <line class="guiLine lineHighlight" filter="url(#globalSvgBlurFilter)"
               x1="100" x2="100" y1="100" y2="70"></line>
     </g>
 </svg>
 
-<br/><!-- TODO stroke dash animation -->
+<br/><!-- stroke dash animation -->
+
 <svg width="120px" height="95" viewBox="-60 -60 120 95">
     <path class="guiLine lineGuide" d="M -43.3 25 A 50 50 0 1 1 43.3 25"></path>
     <path class="guiLine lineHighlight" d="M -43.3 25 A 50 50 0 1 1 43.3 25"
@@ -377,7 +368,47 @@
           stroke-dashoffset="0"
           id="strokegauge" filter="url(#globalSvgBlurFilter)"></path>
 </svg>
-<label><input type="range" value="0" onmousemove="this.nextSibling.textContent = this.value;document.getElementById('strokegauge').setAttribute('stroke-dashoffset', -2/3*2*50*3.1416*this.value/100)"/>0</label>
+<br/>
+<label>set stroke offset<input type="range" value="0" onmousemove="
+var val = -2/3 * 6.283*50 * this.value/100;
+this.nextSibling.textContent = val;
+document.getElementById('strokegauge').setAttribute('stroke-dashoffset', val);
+"/>0</label>
+<br/>
+<label>set global blur<input type="range" width="400" value="0" onmousemove="
+var val = 5*this.value/100;
+this.nextSibling.textContent = val;
+document.getElementById('globalSvgBlurFilter').firstChild.setAttribute('stdDeviation', val);
+"/>0</label>
+
+<br/>
+
+<script>
+    var sliderGauge = new Gauge("sliderGauge")
+            .addToElement(document.body)
+            .setValue(.5);
+</script>
+<br/>
+<label>set gauge value<input type="range" onchange="
+var val = this.value*.01;
+this.nextSibling.textContent = val;
+sliderGauge.setValue(val);
+"/>0</label>
+
+<br/>
+
+<script>
+    var webAnimGauge = new Gauge("webAnimation")
+            .addToElement(document.body)
+            .setValue(1, "immediate");
+    var valueElement = webAnimGauge.getElement().childNodes[1];
+    valueElement.animate([
+        {strokeDashoffset: valueElement.getAttribute("stroke-dashoffset")},
+        {strokeDashoffset: 0}
+    ], 2000);
+    valueElement.setAttribute("stroke-dashoffset", 0);
+</script>
+animated using web-animations
 
 </body>
 </html>
