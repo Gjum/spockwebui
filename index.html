@@ -254,13 +254,13 @@
 </head>
 <body onload="init()">
 <script>
-    var firstGauge = new Gauge("First")
+    var sliderGauge = new Gauge("First")
             .set("minVal", 20)
             .set("maxVal", 40)
             .addToElement(document.body)
             .setValue(40, "immediate")
             .setValue(20);
-    window.setTimeout(firstGauge.setValue, 1000, 30);
+    window.setTimeout(sliderGauge.setValue, 1000, 30);
 </script>
 <script>
     var reversedGauge = new Gauge("Reversed")
@@ -287,24 +287,11 @@
     // counter += 1
 </script>
 
-<br />
-expected final svgs for comparison:
-<br />
-
-<svg width="120px" height="95" viewBox="-60 -60 120 95">
-    <path class="guiLine lineGuide"
-          d="M -43.30127018922194 24.999999999999996 A 50 50 0 1 1 43.30127018922195 24.999999999999964"></path>
-    <path class="guiLine lineHighlight"
-          d="M -43.30127018922194 24.999999999999996 A 50 50 0 0 1 -9.184850993605149e-15 -50"
-          filter="url(#globalSvgBlurFilter)"></path>
-</svg>
-<svg width="60px" height="50" viewBox="-30 -30 60 50">
-    <path class="guiLine lineGuide"
-          d="M 17.32050807568878 9.999999999999986 A 20 20 0 1 0 -17.320508075688775 9.999999999999998"></path>
-    <path class="guiLine lineHighlight"
-          d="M 17.32050807568878 9.999999999999986 A 20 20 0 1 0 -19.02113032590307 -6.180339887498954"
-          filter="url(#globalSvgBlurFilter)"></path>
-</svg>
+<br/>
+<label><input type="range" min="20" max="40" step=".1" oninput="
+this.nextSibling.textContent = this.value;
+sliderGauge.setValue(this.value);
+"/>30</label>
 
 <br/><!-- experiments -->
 
@@ -359,56 +346,13 @@ expected final svgs for comparison:
     </g>
 </svg>
 
-<br/><!-- stroke dash animation -->
-
-<svg width="120px" height="95" viewBox="-60 -60 120 95">
-    <path class="guiLine lineGuide" d="M -43.3 25 A 50 50 0 1 1 43.3 25"></path>
-    <path class="guiLine lineHighlight" d="M -43.3 25 A 50 50 0 1 1 43.3 25"
-          stroke-dasharray="0 210 210 0"
-          stroke-dashoffset="0"
-          id="strokegauge" filter="url(#globalSvgBlurFilter)"></path>
-</svg>
 <br/>
-<label>set stroke offset<input type="range" value="0" oninput="
-var val = -2/3 * 6.283*50 * this.value/100;
-this.nextSibling.textContent = val;
-document.getElementById('strokegauge').setAttribute('stroke-dashoffset', val);
-"/>0</label>
-<br/>
-<label>set global blur<input type="range" step="20" width="400" value="0" oninput="
-var val = 5*this.value/100;
-this.nextSibling.textContent = val;
-document.getElementById('globalSvgBlurFilter').firstChild.setAttribute('stdDeviation', val);
-"/>0</label>
+<label>set global blur<input type="range" min="0" max="5" value="2" oninput="
+this.nextSibling.textContent = this.value;
+document.getElementById('globalSvgBlurFilter').firstChild.setAttribute('stdDeviation', this.value);
+"/>2</label>
 
 <br/>
-
-<script>
-    var sliderGauge = new Gauge("sliderGauge")
-            .addToElement(document.body)
-            .setValue(.5);
-</script>
-<br/>
-<label>set gauge value<input type="range" oninput="
-var val = this.value*.01;
-this.nextSibling.textContent = val;
-sliderGauge.setValue(val);
-"/>0</label>
-
-<br/>
-
-<script>
-    var webAnimGauge = new Gauge("webAnimation")
-            .addToElement(document.body)
-            .setValue(1, "immediate");
-    var valueElement = webAnimGauge.getElement().childNodes[1];
-    valueElement.animate([
-        {strokeDashoffset: valueElement.getAttribute("stroke-dashoffset")},
-        {strokeDashoffset: 0}
-    ], 2000);
-    valueElement.setAttribute("stroke-dashoffset", 0);
-</script>
-animated using web-animations
 
 </body>
 </html>
