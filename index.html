@@ -35,7 +35,8 @@
             color: #bebebe;
         }
     </style>
-    <script type="text/javascript">
+</head>
+<script type="text/javascript">
     var svgNS = "http://www.w3.org/2000/svg";
 
     function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
@@ -246,13 +247,14 @@
 
     }
 
-    function init() {
 
+    function onLoad() {
 
     }
-    </script>
-</head>
-<body onload="init()">
+
+</script>
+<body onload="onLoad()">
+
 <script>
     var sliderGauge = new Gauge("First")
             .set("minVal", 20)
