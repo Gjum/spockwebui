@@ -9,12 +9,12 @@
         }
 
         .lineGuide {
-            stroke: #555555;
+            stroke: hsl(0, 0%, 40%);;
             stroke-width: 3px;
         }
 
         .lineHighlight {
-            stroke: #1385ff;
+            stroke: hsl(211, 100%, 54%);;
             stroke-width: 5px;
         }
 
@@ -23,11 +23,11 @@
         }
 
         .shapeGuide {
-            fill: #555555;
+            fill: hsl(0, 0%, 40%);;
         }
 
         .shapeHighlight {
-            fill: #1385ff;
+            fill: hsl(211, 100%, 54%);;
         }
 
         body {
@@ -89,17 +89,17 @@
         return svg;
     }
 
-    function setBlur(element, id) {
-        id = id || "globalSvgBlurFilter";
-        var filterUrl = "url(#" + id + ")";
+    function setBlur(element, blurId) {
+        blurId = blurId || "globalSvgBlurFilter";
+        var filterUrl = "url(#" + blurId + ")";
 
-        if (!document.getElementById(id)) {
+        if (!document.getElementById(blurId)) {
             var blur = document.createElementNS(svgNS, "feGaussianBlur");
             blur.setAttribute("in", "StrokePaint");
-            blur.setAttribute("stdDeviation", "3");
+            blur.setAttribute("stdDeviation", "2");
 
             var filter = document.createElementNS(svgNS, "filter");
-            filter.setAttribute("id", id);
+            filter.setAttribute("id", blurId);
             filter.appendChild(blur);
 
             createOrGetGlobalSvg().appendChild(filter);
@@ -369,13 +369,13 @@ expected final svgs for comparison:
           id="strokegauge" filter="url(#globalSvgBlurFilter)"></path>
 </svg>
 <br/>
-<label>set stroke offset<input type="range" value="0" onmousemove="
+<label>set stroke offset<input type="range" value="0" oninput="
 var val = -2/3 * 6.283*50 * this.value/100;
 this.nextSibling.textContent = val;
 document.getElementById('strokegauge').setAttribute('stroke-dashoffset', val);
 "/>0</label>
 <br/>
-<label>set global blur<input type="range" width="400" value="0" onmousemove="
+<label>set global blur<input type="range" step="20" width="400" value="0" oninput="
 var val = 5*this.value/100;
 this.nextSibling.textContent = val;
 document.getElementById('globalSvgBlurFilter').firstChild.setAttribute('stdDeviation', val);
@@ -389,7 +389,7 @@ document.getElementById('globalSvgBlurFilter').firstChild.setAttribute('stdDevia
             .setValue(.5);
 </script>
 <br/>
-<label>set gauge value<input type="range" onchange="
+<label>set gauge value<input type="range" oninput="
 var val = this.value*.01;
 this.nextSibling.textContent = val;
 sliderGauge.setValue(val);
