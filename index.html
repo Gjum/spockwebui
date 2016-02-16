@@ -118,18 +118,24 @@
         this.startAngle = 240;
         this.endAngle = 480;
         this.blur = true;
+        this.maxDelay = 500; // time in ms for the animation from minVal to maxVal
+
         // TODO refactor animation stuff into helper
-        this.animDuration = 500;
-        var targetDashOffset = null;
-        var animStartDashOffset = null;
+        var targetDashOffset = null; // dash offset after animation, in pixels
+        var animStartDashOffset = null; // dash offset before animation, in pixels
         var animation = null;
 
-        var arcPixel = 0;
+        var arcPixel = 0; // total arc length, in pixels
         var svgElement = null;
         var valueElement = null;
 
         this.set = setObjAttr;
         var self = this;
+
+        function getAnimDuration() {
+            var deltaPixel = Math.abs(targetDashOffset - animStartDashOffset);
+            return self.maxDelay * deltaPixel / arcPixel;
+        }
 
         this.setValue = function (newVal, immediate) {
             if (!valueElement) {
@@ -141,11 +147,11 @@
                 // calculate the current attribute value,
                 // because the DOM does not store it
                 // TODO can we get the current attribute value from the animation object?
-                var progress = animation.currentTime / self.animDuration;
+                var progress = animation.currentTime / getAnimDuration();
                 animation.finish();
                 animation = null;
                 animStartDashOffset = interpolate(progress, animStartDashOffset, targetDashOffset);
-                // TODO cubic spline?
+                // TODO cubic spline? ease-out?
             }
             else animStartDashOffset = valueElement.getAttribute("stroke-dashoffset");
 
@@ -159,14 +165,13 @@
             }
 
             self.value = newVal;
-
             targetDashOffset = getDashOffset(self.value);
 
             if (!immediate) {
                 animation = valueElement.animate([
                     {strokeDashoffset: animStartDashOffset},
                     {strokeDashoffset: targetDashOffset}
-                ], self.animDuration);
+                ], getAnimDuration());
             }
 
             // after the animation is done, the property reverts to
