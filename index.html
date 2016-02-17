@@ -132,11 +132,6 @@
         this.set = setObjAttr;
         var self = this;
 
-        function getAnimDuration() {
-            var deltaPixel = Math.abs(targetDashOffset - animStartDashOffset);
-            return self.maxDelay * deltaPixel / arcPixel;
-        }
-
         this.setValue = function (newVal, immediate) {
             if (!valueElement) {
                 console.warn("Gauge", id, "setting value before adding to DOM");
@@ -179,6 +174,11 @@
             valueElement.setAttribute("stroke-dashoffset", targetDashOffset);
 
             return this;
+
+            function getAnimDuration() {
+                var deltaPixel = Math.abs(targetDashOffset - animStartDashOffset);
+                return self.maxDelay * deltaPixel / arcPixel;
+            }
         };
 
         this.addToElement = function (element) {
@@ -220,11 +220,10 @@
             outlineElement.setAttribute("class", "guiLine lineGuide");
             outlineElement.setAttribute("d", d);
 
-            var maxBottomAngle = Math.max(self.startAngle, self.endAngle);
-            var bottomPart = polarToCartesian(0, 0, self.radius, maxBottomAngle).y;
-
             var padding = 10;
             var boxRadius = self.radius + padding;
+            var maxBottomAngle = Math.max(self.startAngle, self.endAngle);
+            var bottomPart = polarToCartesian(0, 0, self.radius, maxBottomAngle).y;
             var left = -boxRadius;
             var top = -boxRadius;
             var width = 2 * boxRadius;
