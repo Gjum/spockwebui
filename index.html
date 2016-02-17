@@ -129,7 +129,6 @@
         var svgElement = null;
         var valueElement = null;
 
-        this.set = setObjAttr;
         var self = this;
 
         this.setValue = function (newVal, immediate) {
@@ -181,18 +180,13 @@
             }
         };
 
-        this.addToElement = function (element) {
-            element.appendChild(this.getElement());
-            return this;
-        };
-
         this.getElement = function () {
             if (!svgElement) createElements();
             return svgElement;
         };
 
         function createElements() {
-            if (valueElement) {
+            if (svgElement) {
                 console.warn("Gauge", id, "was already created");
                 return svgElement;
             }
@@ -251,38 +245,48 @@
 
     }
 
+    var gauges = {};
+    window.addEventListener("load", function () {
+        // convert all <gauge> tags into <svg> and add Gauge objects to gauges
+        Array.from(document.getElementsByTagName("gauge")).forEach(function (node) {
+            var gauge = new Gauge(node.id);
+            Object.getOwnPropertyNames(gauge).forEach(function (attr) {
+                // if the node has the attribute, set the corresponding gauge attribute
+                // all gauge attributes are numerical
+                var val = parseFloat(node.getAttribute(attr));
+                if (!isNaN(val)) gauge[attr] = val;
+            });
+            if (node.id) gauges[node.id] = gauge;
+            node.parentNode.replaceChild(gauge.getElement(), node);
+        });
+    });
 
     function onLoad() {
-
     }
 
 </script>
 <body onload="onLoad()">
 
+<gauge id="SliderGauge" minVal="20" maxVal="40"></gauge>
+<gauge id="ReversedGauge" radius="20" startAngle="480" endAngle="240"></gauge>
 <script>
-    var sliderGauge = new Gauge("First")
-            .set("minVal", 20)
-            .set("maxVal", 40)
-            .addToElement(document.body)
-            .setValue(40, "immediate")
-            .setValue(20);
-    window.setTimeout(sliderGauge.setValue, 1000, 30);
-</script>
-<script>
-    var reversedGauge = new Gauge("Reversed")
-            .set("radius", 20)
-            .set("startAngle", 480)
-            .set("endAngle", 240)
-            .addToElement(document.body)
-            .setValue(.2, "immediate")
-            .setValue(.8);
+    window.addEventListener("load", function () {
+        gauges["SliderGauge"]
+                .setValue(40, "immediate")
+                .setValue(20);
+        window.setTimeout(gauges["SliderGauge"].setValue, 1000, 30);
+
+        gauges["ReversedGauge"]
+                .setValue(.2, "immediate")
+                .setValue(.8);
+    });
 </script>
 
 <br/>
 
 <label><input type="range" min="20" max="40" step=".1" oninput="
 this.nextSibling.textContent = this.value;
-sliderGauge.setValue(this.value);
+gauges['SliderGauge'].setValue(this.value);
 "/>30</label>
 
 <br/><!-- experiments -->
